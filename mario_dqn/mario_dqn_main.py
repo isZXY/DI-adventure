@@ -6,7 +6,7 @@ from ding.config import compile_config
 from ding.worker import BaseLearner, SampleSerialCollector, InteractionSerialEvaluator, AdvancedReplayBuffer
 from ding.envs import SyncSubprocessEnvManager, DingEnvWrapper, BaseEnvManager
 from wrapper import MaxAndSkipWrapper, WarpFrameWrapper, ScaledFloatFrameWrapper, FrameStackWrapper, \
-    FinalEvalRewardEnv
+    FinalEvalRewardEnv, StickyActionWrapper, CoinRewardWrapper, SparseRewardWrapper,TimeRewardWrapper
 from policy import DQNPolicy
 from model import DQN
 from ding.utils import set_pkg_seed
@@ -18,7 +18,6 @@ from functools import partial
 import os
 import gym_super_mario_bros
 
-
 # 动作相关配置
 action_dict = {2: [["right"], ["right", "A"]], 7: SIMPLE_MOVEMENT, 12: COMPLEX_MOVEMENT}
 action_nums = [2, 7, 12]
@@ -28,7 +27,7 @@ action_nums = [2, 7, 12]
 def wrapped_mario_env(version=0, action=7, obs=1):
     return DingEnvWrapper(
         # 设置mario游戏版本与动作空间
-        JoypadSpace(gym_super_mario_bros.make("SuperMarioBros-1-1-v"+str(version)), action_dict[int(action)]),
+        JoypadSpace(gym_super_mario_bros.make("SuperMarioBros-1-1-v" + str(version)), action_dict[int(action)]),
         cfg={
             # 添加各种wrapper
             'env_wrapper': [
@@ -43,12 +42,17 @@ def wrapped_mario_env(version=0, action=7, obs=1):
                 # 默认wrapper：在评估一局游戏结束时返回累计的奖励，方便统计
                 lambda env: FinalEvalRewardEnv(env),
                 # 以下是你添加的wrapper
+                #lambda env: StickyActionWrapper(env),
+                lambda env: TimeRewardWrapper(env),
+
+                #lambda env: CoinRewardWrapper(env),
+
             ]
         }
     )
 
 
-def main(cfg, args, seed=0, max_env_step=int(3e6)):
+def main(cfg, args, seed=0, max_env_step=int(10e6)):
     # Easydict类实例，包含一些配置
     cfg = compile_config(
         cfg,
@@ -65,11 +69,13 @@ def main(cfg, args, seed=0, max_env_step=int(3e6)):
     collector_env_num, evaluator_env_num = cfg.env.collector_env_num, cfg.env.evaluator_env_num
     # 收集经验的环境，使用并行环境管理器
     collector_env = SyncSubprocessEnvManager(
-        env_fn=[partial(wrapped_mario_env, version=args.version, action=args.action, obs=args.obs) for _ in range(collector_env_num)], cfg=cfg.env.manager
+        env_fn=[partial(wrapped_mario_env, version=args.version, action=args.action, obs=args.obs) for _ in
+                range(collector_env_num)], cfg=cfg.env.manager
     )
     # 评估性能的环境，使用并行环境管理器
     evaluator_env = SyncSubprocessEnvManager(
-        env_fn=[partial(wrapped_mario_env, version=args.version, action=args.action, obs=args.obs) for _ in range(evaluator_env_num)], cfg=cfg.env.manager
+        env_fn=[partial(wrapped_mario_env, version=args.version, action=args.action, obs=args.obs) for _ in
+                range(evaluator_env_num)], cfg=cfg.env.manager
     )
 
     # 为mario环境设置种子
@@ -103,8 +109,8 @@ def main(cfg, args, seed=0, max_env_step=int(3e6)):
         # 根据当前训练迭代数决定是否进行评估
         if evaluator.should_eval(learner.train_iter):
             stop, reward = evaluator.eval(learner.save_checkpoint, learner.train_iter, collector.envstep)
-            if stop:
-                break
+            # if stop:
+            #     break
         # 更新epsilon greedy信息
         eps = epsilon_greedy(collector.envstep)
         # 经验收集器从环境中收集经验
@@ -124,17 +130,19 @@ def main(cfg, args, seed=0, max_env_step=int(3e6)):
 if __name__ == "__main__":
     from copy import deepcopy
     import argparse
+
     parser = argparse.ArgumentParser()
     # 种子
     parser.add_argument("--seed", "-s", type=int, default=0)
     # 游戏版本，v0 v1 v2 v3 四种选择
-    parser.add_argument("--version", "-v", type=int, default=0, choices=[0,1,2,3])
+    parser.add_argument("--version", "-v", type=int, default=0, choices=[0, 1, 2, 3])
     # 动作集合种类，包含[["right"], ["right", "A"]]、SIMPLE_MOVEMENT、COMPLEX_MOVEMENT，分别对应2、7、12个动作
-    parser.add_argument("--action", "-a", type=int, default=7, choices=[2,7,12])
+    parser.add_argument("--action", "-a", type=int, default=7, choices=[2, 7, 12])
     # 观测空间叠帧数目，不叠帧或叠四帧
-    parser.add_argument("--obs", "-o", type=int, default=1, choices=[1,4])
+    parser.add_argument("--obs", "-o", type=int, default=1, choices=[1, 4])
     args = parser.parse_args()
-    mario_dqn_config.exp_name = 'exp/v'+str(args.version)+'_'+str(args.action)+'a_'+str(args.obs)+'f_seed'+str(args.seed)
-    mario_dqn_config.policy.model.obs_shape=[args.obs, 84, 84]
-    mario_dqn_config.policy.model.action_shape=args.action
+    mario_dqn_config.exp_name = 'exp/v' + str(args.version) + '_' + str(args.action) + 'a_' + str(
+        args.obs) + 'f_seed' + str(args.seed) + '10M'+'TimeFast'
+    mario_dqn_config.policy.model.obs_shape = [args.obs, 84, 84]
+    mario_dqn_config.policy.model.action_shape = args.action
     main(deepcopy(mario_dqn_config), args, seed=args.seed)

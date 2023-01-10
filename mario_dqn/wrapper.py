@@ -88,6 +88,7 @@ class CoinRewardWrapper(gym.Wrapper):
         return obs, reward, done, info
 
 
+
 # CAM相关，不需要了解
 def dump_arr2video(arr, video_folder):
     fourcc = cv2.VideoWriter_fourcc(*'MP4V')
@@ -122,6 +123,29 @@ def get_cam(img, model):
 
     # In this example grayscale_cam has only one image in the batch:
     return grayscale_cam
+
+
+class TimeRewardWrapper(gym.Wrapper):
+    """
+   Overview:
+       add time reward
+   Interface:
+       ``__init__``, ``step``
+   Properties:
+       - env (:obj:`gym.Env`): the environment to wrap.
+   """
+
+
+def __init__(self, env: gym.Env):
+    super().__init__(env)
+
+
+def step(self, action):
+    obs, reward, done, info = self.env.step(action)
+    # dead = True if reward == -15 else False
+    if info['flag_get']:
+        reward += int((info['time'] - 300) * (0.1))
+    return obs, reward, done, info
 
 
 def capped_cubic_video_schedule(episode_id):
